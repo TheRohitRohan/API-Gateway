@@ -1,0 +1,26 @@
+node_modules/
+dist/
+.turbo/
+.env
+.env*.local
+*.log
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Prisma
+/services/*/prisma/migrations
+/services/*/prisma/*.db
+/services/*/prisma/*.sqlite
+services/*/src/generated/
+
+# Editor files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,25 @@
+{
+  "name": "microservices-demo",
+  "private": true,
+  "packageManager": "pnpm@9.5.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,js,json,md,prisma}\"",
+    "test": "turbo run test",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "turbo run db:migrate",
+    "db:seed": "turbo run db:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.4",
+    "typescript": "^5.5.3",
+    "prettier": "^3.3.2",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/parser": "^7.15.0",
+    "@typescript-eslint/eslint-plugin": "^7.15.0",
+    "tsx": "^4.16.2",
+    "@types/node": "^22.0.0"
+  }
+}
