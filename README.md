@@ -1,8 +1,8 @@
-# Microservices Playground for API Gateway Development
+# Microservices Playground with API Gateway
 
-This repository contains a realistic, production-inspired microservices playground engineered specifically as a target backend for developing and demonstrating a robust, production-grade **API Gateway**.
+This repository contains a realistic, production-inspired microservices playground engineered with a robust, production-grade **API Gateway** and a suite of downstream microservices.
 
-The microservices are intentionally kept lightweight and focused solely on business logic, leaving all cross-cutting infrastructure concerns (such as authentication, tracing, rate-limiting, and circuit breaking) to the future API Gateway layer.
+The downstream microservices are kept lightweight and focused on business logic, while all cross-cutting infrastructure concerns (such as HTTPS/SSL termination, authentication, authorization, rate-limiting, circuit breaking, and load balancing) are centralized within the API Gateway layer.
 
 ---
 
@@ -10,11 +10,11 @@ The microservices are intentionally kept lightweight and focused solely on busin
 
 ```mermaid
 graph TD
-    Client[Client Browser / App] -->|HTTPS| Gateway[API Gateway <br><i>(To Be Developed)</i>]
-    
+    Client[Client Browser / App] -->|HTTPS / Port 3000| Gateway[API Gateway]
+
     subgraph "Monorepo Microservices (Port Map)"
         Gateway -->|Port 3001| Auth[Auth Service]
-        Gateway -->|Port 3002| Product[Product Service]
+        Gateway -->|Port 3002/3012/3022| Product[Product Service <br><i>(Load Balanced)</i>]
         Gateway -->|Port 3003| Cart[Cart Service]
         Gateway -->|Port 3004| Order[Order Service]
         Gateway -->|Port 3005| Payment[Payment Service]
@@ -28,6 +28,7 @@ graph TD
         Cart -->|Cache| RedisCache[(Redis: Port 6379)]
         Order -->|Read/Write| OrderDB[(PostgreSQL: order_db)]
         Payment -->|Read/Write| PaymentDB[(PostgreSQL: payment_db)]
+        Gateway -->|Cache & Rate Limit| RedisCache
     end
 ```
 
@@ -39,10 +40,11 @@ graph TD
 microservices-demo/
 ├── apps/
 │   └── gateway/
-│       └── README.md             # Gateway architecture requirements and guidelines
+│       ├── src/                  # API Gateway implementation
+│       └── README.md             # Detailed Gateway architecture and runtime configuration
 ├── services/
 │   ├── auth-service/             # Registration, login, and JWT access token issuance
-│   ├── product-service/          # Paginated product catalog CRUD & category filters
+│   ├── product-service/          # Paginated product catalog CRUD & category filters (Supports clustering)
 │   ├── cart-service/             # Active cart operations cached in Redis & saved in PostgreSQL
 │   ├── order-service/            # Order creation, history, and status management
 │   ├── payment-service/          # Mock payment processing (simulates card failure rules)
@@ -52,7 +54,7 @@ microservices-demo/
 │   └── shared-utils/             # Generic logger (Pino) and standardized HTTP error models
 ├── docker/
 │   └── init-db.sh                # Automatic database setup script for Postgres container
-├── docker-compose.yml            # Local development postgres/redis orchestration
+├── docker-compose.yml            # Local development postgres/redis/microservices orchestration
 ├── turbo.json                    # Turborepo task pipeline configuration
 ├── pnpm-workspace.yaml           # pnpm monorepo workspaces mapping
 ├── package.json                  # Monorepo root dev scripts
@@ -63,27 +65,35 @@ microservices-demo/
 
 ## Technical Stack
 
-* **Language**: TypeScript (Strict Mode enabled)
-* **Runtime**: Node.js 22 LTS
-* **Monorepo Manager**: Turborepo & pnpm Workspaces
-* **Web Framework**: Fastify
-* **ORM**: Prisma (using isolated databases in PostgreSQL)
-* **Cache**: Redis (transient cache with automatic fail-safes)
-* **Validation**: Zod
-* **Logger**: Pino (JSON structured format)
-* **API Documentation**: Swagger / OpenAPI (exposing `/documentation` per service)
-* **Testing**: Vitest
+- **Language**: TypeScript (Strict Mode enabled)
+- **Runtime**: Node.js 22 LTS
+- **Monorepo Manager**: Turborepo & pnpm Workspaces
+- **API Gateway**: Fastify-based, featuring:
+    - **SSL/HTTPS Termination** with localhost certificates
+    - **JWT Validation** & **Role-Based Access Control (RBAC)**
+    - **Redis-Backed Rate Limiting** (sliding window)
+    - **Dynamic Service Discovery** & routing registry
+    - **Round-Robin Load Balancing** with health bypass
+    - **Resilience Patterns**: Circuit Breakers, Request Timeouts, and Retries with Jitter
+    - **Observability**: Prometheus metrics (prom-client) & JSON logging (Pino)
+- **Web Framework**: Fastify
+- **ORM**: Prisma (using isolated databases in PostgreSQL)
+- **Cache**: Redis (transient cache with automatic fail-safes)
+- **Validation**: Zod
+- **Logger**: Pino (JSON structured format)
+- **API Documentation**: Swagger / OpenAPI (exposing `/documentation` per service)
+- **Testing**: Vitest
 
 ---
 
 ## Identity Propagation (Gateway Contract)
 
-Downstream microservices (Product, Cart, Order, Payment, Notification) do **NOT** verify JWT access tokens. They trust the API Gateway to do so, and expect the Gateway to pass verified identity information through HTTP headers:
+Downstream microservices (Product, Cart, Order, Payment, Notification) do **NOT** verify JWT access tokens directly. They trust the API Gateway to do so, and expect the Gateway to pass verified identity information through HTTP headers:
 
-* `X-User-Id` - Unique ID of the verified user (UUID string).
-* `X-User-Role` - Role of the verified user (`admin` or `customer`).
-* `X-Request-Id` - Request tracking ID generated by the gateway.
-* `X-Correlation-Id` - Request tracking ID propagated across distributed calls.
+- `x-user-id` - Unique ID of the verified user (UUID string).
+- `x-user-role` - Role of the verified user (`admin` or `customer`).
+- `x-user-email` - Email address of the verified user.
+- `x-request-id` - Request tracking ID generated by the gateway.
 
 ---
 
@@ -91,16 +101,19 @@ Downstream microservices (Product, Cart, Order, Payment, Notification) do **NOT*
 
 For local development or Docker orchestration, ports are allocated as follows:
 
-| Services | Exposed Port | Database / Schema | Description |
-|---|---|---|---|
-| PostgreSQL | `5432` | Multiple | Primary transactional databases |
-| Redis | `6379` | `0` | Caching active cart sessions |
-| **Auth Service** | `3001` | `auth_db` | `/api/v1/auth` (Registers/Logins) |
-| **Product Service** | `3002` | `product_db` | `/api/v1/products` (Catalog list/CRUD) |
-| **Cart Service** | `3003` | `cart_db` | `/api/v1/cart` (Cache-enabled basket CRUD) |
-| **Order Service** | `3004` | `order_db` | `/api/v1/orders` (Order workflows) |
-| **Payment Service** | `3005` | `payment_db` | `/api/v1/payments` (Mock processor) |
-| **Notification Service** | `3006` | None | `/api/v1/notifications` (Mocks logger) |
+| Services                 | Exposed Port            | Database / Schema | Description                                              |
+| ------------------------ | ----------------------- | ----------------- | -------------------------------------------------------- |
+| **API Gateway**          | `3000` (HTTPS)          | None              | Central entry point (Reverse proxy, Load Balancer, Auth) |
+| PostgreSQL               | `5432`                  | Multiple          | Primary transactional databases                          |
+| Redis                    | `6380` (Local) / `6379` | `0`               | Rate limiting & caching active cart sessions             |
+| **Auth Service**         | `3001`                  | `auth_db`         | `/api/v1/auth` (Registers/Logins)                        |
+| **Product Service 1**    | `3002`                  | `product_db`      | `/api/v1/products` (Catalog list/CRUD instance 1)        |
+| **Product Service 2**    | `3012`                  | `product_db`      | `/api/v1/products` (Catalog list/CRUD instance 2)        |
+| **Product Service 3**    | `3022`                  | `product_db`      | `/api/v1/products` (Catalog list/CRUD instance 3)        |
+| **Cart Service**         | `3003`                  | `cart_db`         | `/api/v1/cart` (Cache-enabled basket CRUD)               |
+| **Order Service**        | `3004`                  | `order_db`        | `/api/v1/orders` (Order workflows)                       |
+| **Payment Service**      | `3005`                  | `payment_db`      | `/api/v1/payments` (Mock processor)                      |
+| **Notification Service** | `3006`                  | None              | `/api/v1/notifications` (Mocks logger)                   |
 
 ---
 
@@ -109,22 +122,25 @@ For local development or Docker orchestration, ports are allocated as follows:
 ### 1. Prerequisites
 
 Ensure you have the following installed:
-* [Node.js 22+](https://nodejs.org/)
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-* [pnpm](https://pnpm.io/) (`npm i -g pnpm`)
+
+- [Node.js 22+](https://nodejs.org/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [pnpm](https://pnpm.io/) (`npm i -g pnpm`)
 
 ### 2. Set Up Infrastructure Containers
 
 Spin up the shared PostgreSQL and Redis containers:
+
 ```bash
 docker compose up -d postgres redis
 ```
 
-*Note: The `postgres` container automatically triggers `docker/init-db.sh` to initialize five isolated databases on startup (`auth_db`, `product_db`, etc.).*
+_Note: The `postgres` container automatically triggers `docker/init-db.sh` to initialize five isolated databases on startup (`auth_db`, `product_db`, etc.)._
 
 ### 3. Install Dependencies and Generate Prisma Clients
 
 Run the following command at the monorepo root to link packages and generate the Prisma Client for each database-connected microservice:
+
 ```bash
 pnpm install
 pnpm db:generate
@@ -133,6 +149,7 @@ pnpm db:generate
 ### 4. Run Database Migrations & Seeds
 
 Apply schemas and seed initial data (Admin users, categories, products, etc.):
+
 ```bash
 pnpm db:migrate
 pnpm db:seed
@@ -140,24 +157,37 @@ pnpm db:seed
 
 ### 5. Start Development Server
 
-Run all microservices concurrently in watch mode:
+Run the API Gateway and all microservices concurrently in watch mode:
+
 ```bash
 pnpm dev
 ```
 
-You can now visit each service's interactive Swagger API catalog under:
-* Auth Service: [http://localhost:3001/documentation](http://localhost:3001/documentation)
-* Product Service: [http://localhost:3002/documentation](http://localhost:3002/documentation)
-* Cart Service: [http://localhost:3003/documentation](http://localhost:3003/documentation)
-* Order Service: [http://localhost:3004/documentation](http://localhost:3004/documentation)
-* Payment Service: [http://localhost:3005/documentation](http://localhost:3005/documentation)
-* Notification Service: [http://localhost:3006/documentation](http://localhost:3006/documentation)
+The system will start up. All client traffic should route through the **API Gateway** on port 3000:
+
+- **Gateway Endpoint**: `https://localhost:3000/api/v1/...`
+- **Gateway Health Status**: `https://localhost:3000/health`
+- **Prometheus Metrics**: `https://localhost:3000/metrics`
+- **Dynamic Service Registry**: `https://localhost:3000/discovery`
+
+> [!NOTE]
+> Since the gateway uses a self-signed SSL certificate, you may need to disable SSL verification when making requests (e.g., using `curl -k` or `--insecure`, or selecting "Disable SSL verification" in Postman/your HTTP client).
+
+To inspect downstream microservice documentation directly (bypassing the gateway), you can visit the interactive Swagger API catalogs under:
+
+- Auth Service: [http://localhost:3001/documentation](http://localhost:3001/documentation)
+- Product Service Instances: [http://localhost:3002/documentation](http://localhost:3002/documentation), [http://localhost:3012/documentation](http://localhost:3012/documentation), [http://localhost:3022/documentation](http://localhost:3022/documentation)
+- Cart Service: [http://localhost:3003/documentation](http://localhost:3003/documentation)
+- Order Service: [http://localhost:3004/documentation](http://localhost:3004/documentation)
+- Payment Service: [http://localhost:3005/documentation](http://localhost:3005/documentation)
+- Notification Service: [http://localhost:3006/documentation](http://localhost:3006/documentation)
 
 ---
 
 ## Running Test Suites
 
 To execute unit and integration test suites globally using Turborepo and Vitest:
+
 ```bash
 pnpm test
 ```
@@ -166,8 +196,20 @@ pnpm test
 
 ## Docker Deployment (All Services)
 
-To run the entire system—including database, Redis, and all microservices—inside Docker containers:
+To run the entire system—including database, Redis, the API Gateway, and all microservices—inside Docker containers:
+
 ```bash
 docker compose up --build
 ```
-This builds and connects all the microservices, enabling testing of the playground directly within a isolated Docker Network (`microservices_network`).
+
+This builds and connects all the services, enabling full integration testing of the playground directly within the isolated Docker Network (`microservices_network`).
+
+```bash
+docker compose up -d postgres redis
+```
+
+_Note: The `postgres` container automatically triggers `docker/init-db.sh` to initialize five isolated databases on startup (`auth_db`, `product_db`, etc.)._
+
+### 3. Install Dependencies and Generate Prisma Clients
+
+Run the following command at the monorepo root to link packages and generate the Prisma Client for each database-connected microservice:

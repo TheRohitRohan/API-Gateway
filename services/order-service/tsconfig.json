@@ -1,8 +1,14 @@
 {
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src"
-  },
-  "include": ["src/**/*"]
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "baseUrl": ".",
+        "paths": {
+            "fastify": ["node_modules/fastify"],
+            "@fastify/swagger": ["node_modules/@fastify/swagger"],
+            "@fastify/swagger-ui": ["node_modules/@fastify/swagger-ui"]
+        }
+    },
+    "include": ["src/**/*"]
 }

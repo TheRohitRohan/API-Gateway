@@ -14,7 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -25,11 +25,11 @@ services:
     image: redis:7-alpine
     container_name: demo-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,9 +40,8 @@ services:
     build:
       context: .
       dockerfile: services/auth-service/Dockerfile
-    container_name: demo-auth-service
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
     environment:
       - PORT=3001
       - NODE_ENV=production
@@ -54,17 +53,51 @@ services:
     networks:
       - microservices_network
 
-  product-service:
+  product-service-1:
     build:
       context: .
       dockerfile: services/product-service/Dockerfile
-    container_name: demo-product-service
-    ports:
-      - "3002:3002"
+    expose:
+      - "3002"
     environment:
       - PORT=3002
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/product_db
+      - INSTANCE_ID=product-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices_network
+
+  product-service-2:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    expose:
+      - "3012"
+    environment:
+      - PORT=3012
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/product_db
+      - INSTANCE_ID=product-2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices_network
+
+  product-service-3:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    expose:
+      - "3022"
+    environment:
+      - PORT=3022
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/product_db
+      - INSTANCE_ID=product-3
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,9 +108,8 @@ services:
     build:
       context: .
       dockerfile: services/cart-service/Dockerfile
-    container_name: demo-cart-service
-    ports:
-      - "3003:3003"
+    expose:
+      - "3003"
     environment:
       - PORT=3003
       - NODE_ENV=production
@@ -95,9 +127,8 @@ services:
     build:
       context: .
       dockerfile: services/order-service/Dockerfile
-    container_name: demo-order-service
-    ports:
-      - "3004:3004"
+    expose:
+      - "3004"
     environment:
       - PORT=3004
       - NODE_ENV=production
@@ -112,9 +143,8 @@ services:
     build:
       context: .
       dockerfile: services/payment-service/Dockerfile
-    container_name: demo-payment-service
-    ports:
-      - "3005:3005"
+    expose:
+      - "3005"
     environment:
       - PORT=3005
       - NODE_ENV=production
@@ -129,14 +159,47 @@ services:
     build:
       context: .
       dockerfile: services/notification-service/Dockerfile
-    container_name: demo-notification-service
-    ports:
-      - "3006:3006"
+    expose:
+      - "3006"
     environment:
       - PORT=3006
       - NODE_ENV=production
     networks:
       - microservices_network
+
+  gateway:
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=supersecretjwtkey_123!
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      product-service-1:
+        condition: service_started
+      product-service-2:
+        condition: service_started
+      product-service-3:
+        condition: service_started
+      cart-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+    networks:
+      - microservices_network
+    volumes:
+      - ./apps/gateway/certs:/app/apps/gateway/certs:ro
 
 volumes:
   postgres_data:

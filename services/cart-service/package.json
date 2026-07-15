@@ -1,35 +1,35 @@
 {
-  "name": "cart-service",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "main": "dist/index.js",
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "test": "vitest run",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts"
-  },
-  "dependencies": {
-    "@microservices-demo/shared-types": "workspace:*",
-    "@microservices-demo/shared-utils": "workspace:*",
-    "fastify": "^4.28.1",
-    "@fastify/swagger": "^8.14.0",
-    "@fastify/swagger-ui": "^3.0.0",
-    "@prisma/client": "^5.16.1",
-    "zod": "^3.23.8",
-    "ioredis": "^5.4.1",
-    "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
-    "prisma": "^5.16.1",
-    "vitest": "^1.6.0",
-    "@types/ioredis": "^4.28.10"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  }
+    "name": "cart-service",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc && mkdir -p dist/generated && cp -r src/generated/client dist/generated/",
+        "dev": "tsx watch src/index.ts",
+        "start": "node dist/index.js",
+        "test": "vitest run",
+        "db:generate": "prisma generate",
+        "db:migrate": "prisma migrate deploy",
+        "db:seed": "tsx prisma/seed.ts"
+    },
+    "dependencies": {
+        "@microservices-demo/shared-types": "workspace:*",
+        "@microservices-demo/shared-utils": "workspace:*",
+        "fastify": "^4.28.1",
+        "@fastify/swagger": "^8.14.0",
+        "@fastify/swagger-ui": "^3.0.0",
+        "@prisma/client": "^5.16.1",
+        "zod": "^3.23.8",
+        "ioredis": "^5.4.1",
+        "dotenv": "^16.4.5"
+    },
+    "devDependencies": {
+        "prisma": "^5.16.1",
+        "vitest": "^1.6.0",
+        "@types/ioredis": "^4.28.10"
+    },
+    "prisma": {
+        "seed": "tsx prisma/seed.ts"
+    }
 }
