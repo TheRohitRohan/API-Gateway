@@ -8,20 +8,20 @@ The API Gateway is a production-grade, Fastify-based gateway designed as the sin
 
 ```mermaid
 flowchart TD
-    Client([Client Request]) -->|HTTPS / Port 3000| Gateway[API Gateway]
+    Client(["Client Request"]) -->|HTTPS / Port 3000| Gateway["API Gateway"]
 
-    subgraph Middleware Pipeline
-        M1[Request ID Generator] --> M2[Pino Request Logger]
-        M2 --> M3[Prometheus Metrics]
-        M3 --> M4[JWT Authentication]
-        M4 --> M5[Prefix Routing Router]
-        M5 --> M6[Role Authorization RBAC]
-        M6 --> M7[Redis Rate Limiter]
-        M7 --> M8[Proxy & Load Balancer]
+    subgraph Pipeline ["Middleware Pipeline"]
+        M1["Request ID Generator"] --> M2["Pino Request Logger"]
+        M2 --> M3["Prometheus Metrics"]
+        M3 --> M4["JWT Authentication"]
+        M4 --> M5["Prefix Routing Router"]
+        M5 --> M6["Role Authorization RBAC"]
+        M6 --> M7["Redis Rate Limiter"]
+        M7 --> M8["Proxy & Load Balancer"]
     end
 
-    Gateway --> Middleware Pipeline
-    M8 -->|Round-Robin| Downstream[Upstream Microservice Instance]
+    Gateway --> Pipeline
+    M8 -->|Round-Robin| Downstream["Upstream Microservice Instance"]
 ```
 
 ### 1. Reverse Proxy & Dynamic Routing

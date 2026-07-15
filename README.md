@@ -1,215 +1,316 @@
-# Microservices Playground with API Gateway
+# API Gateway
 
-This repository contains a realistic, production-inspired microservices playground engineered with a robust, production-grade **API Gateway** and a suite of downstream microservices.
+A production-inspired API Gateway built with TypeScript and Fastify that implements core gateway patterns from scratch — TLS termination, JWT authentication, RBAC, health-aware load balancing, circuit breaking, retry with backoff, service discovery, rate limiting, and observability.
 
-The downstream microservices are kept lightweight and focused on business logic, while all cross-cutting infrastructure concerns (such as HTTPS/SSL termination, authentication, authorization, rate-limiting, circuit breaking, and load balancing) are centralized within the API Gateway layer.
+[![Node.js](https://img.shields.io/badge/Node.js-LTS-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Fastify](https://img.shields.io/badge/Fastify-framework-000000?logo=fastify&logoColor=white)](https://fastify.dev/)
+[![Redis](https://img.shields.io/badge/Redis-Rate_Limiting-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![Prometheus](https://img.shields.io/badge/Prometheus-Metrics-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![pnpm](https://img.shields.io/badge/pnpm-Workspaces-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
+
+![System Architecture](docs/system-architecture.png)
 
 ---
 
-## Architecture Overview
+## Overview
 
-```mermaid
-graph TD
-    Client[Client Browser / App] -->|HTTPS / Port 3000| Gateway[API Gateway]
+The gateway acts as the single entry point for all client traffic. It enforces security, manages upstream routing, and provides resilience guarantees before a request ever reaches a backend service.
 
-    subgraph "Monorepo Microservices (Port Map)"
-        Gateway -->|Port 3001| Auth[Auth Service]
-        Gateway -->|Port 3002/3012/3022| Product[Product Service <br><i>(Load Balanced)</i>]
-        Gateway -->|Port 3003| Cart[Cart Service]
-        Gateway -->|Port 3004| Order[Order Service]
-        Gateway -->|Port 3005| Payment[Payment Service]
-        Gateway -->|Port 3006| Notification[Notification Service]
-    end
+| Capability                  | Details                                                                                 |
+| :-------------------------- | :-------------------------------------------------------------------------------------- |
+| TLS Termination             | HTTPS enforced at the edge using locally-trusted certificates via mkcert.               |
+| JWT Authentication          | Bearer tokens validated on every non-public request; public routes bypass this stage.   |
+| RBAC Authorization          | Per-service role policies enforced against the verified token payload.                  |
+| Rate Limiting               | Sliding-window rate limits backed by Redis, keyed per user ID or IP address.            |
+| Health-aware Load Balancing | Round-Robin across registered instances; unhealthy or open-circuit targets are skipped. |
+| Circuit Breaker             | Per-instance stateful breaker (CLOSED / OPEN / HALF-OPEN) with configurable thresholds. |
+| Retry with Backoff          | Exponential backoff with jitter for safe HTTP methods on transient upstream failures.   |
+| Reverse Proxy               | Native stream-based proxying; identity headers injected before forwarding.              |
+| Service Discovery           | Runtime registration and deregistration of service instances via HTTP API.              |
+| Observability               | Prometheus metrics and structured JSON logs on every request.                           |
+| Graceful Shutdown           | SIGTERM / SIGINT handling drains connections and closes Redis cleanly.                  |
+| Docker Deployment           | Multi-stage Dockerfile; full environment orchestrated with Docker Compose.              |
 
-    subgraph "Infrastructure Services"
-        Auth -->|Read/Write| AuthDB[(PostgreSQL: auth_db)]
-        Product -->|Read/Write| ProductDB[(PostgreSQL: product_db)]
-        Cart -->|Read/Write| CartDB[(PostgreSQL: cart_db)]
-        Cart -->|Cache| RedisCache[(Redis: Port 6379)]
-        Order -->|Read/Write| OrderDB[(PostgreSQL: order_db)]
-        Payment -->|Read/Write| PaymentDB[(PostgreSQL: payment_db)]
-        Gateway -->|Cache & Rate Limit| RedisCache
-    end
-```
+---
+
+## Design Principles
+
+The gateway is built around a small set of core design principles:
+
+- Single entry point for all client traffic
+- Centralized cross-cutting concerns
+- Stateless request processing
+- Fail fast on invalid or unauthorized requests
+- Backend services focus only on business logic
+- Resilience before availability
+- Built-in observability by default
+
+---
+
+## Why API Gateway?
+
+Without a gateway, every service that accepts external traffic must independently implement authentication, authorization, rate limiting, logging, and security. This scatters infrastructure concerns across the codebase, creates inconsistency, and makes operational changes expensive.
+
+![Why API Gateway](docs/why-api-gateway.png)
+
+A gateway centralizes all cross-cutting concerns at the edge. Backend services receive only pre-authenticated, pre-authorized requests and are free to focus on their own business logic. Adding a new security policy, changing rate limit thresholds, or rotating JWT secrets requires a change in exactly one place.
+
+---
+
+## Request Lifecycle
+
+Every inbound request passes through a sequential middleware pipeline. Each stage has one responsibility — if a stage fails, the request is rejected immediately with an appropriate status code rather than forwarding a partially processed request upstream.
+
+![Request Lifecycle](docs/request-lifecycle.png)
+
+The pipeline runs in order: TLS termination, JWT validation, RBAC check, rate limit enforcement, route resolution, load balancer instance selection, circuit breaker check, retry wrapper, and finally stream-based reverse proxy. The response travels back through the same connection. Failed authentication returns `401`, authorization failures return `403`, rate limit breaches return `429`, open circuit breakers return `503`, and upstream timeouts return `504`.
+
+---
+
+## Features
+
+| Feature                     | Description                                                                         | Status |
+| :-------------------------- | :---------------------------------------------------------------------------------- | :----: |
+| HTTPS / TLS Termination     | SSL handled at the Fastify layer using PEM certificates.                            |   ✅   |
+| JWT Authentication          | Validates `Authorization: Bearer` tokens; configurable secret and algorithm.        |   ✅   |
+| Role-Based Authorization    | Checks `customer` / `admin` roles against per-route access rules.                   |   ✅   |
+| Redis Rate Limiting         | Sliding-window limits per user ID or IP; configurable window and max requests.      |   ✅   |
+| Dynamic Routing             | Prefix-based URL matching maps requests to registered service targets.              |   ✅   |
+| Round-Robin Load Balancing  | Stateful balancer distributes requests evenly across healthy instances.             |   ✅   |
+| Circuit Breaker             | CLOSED → OPEN → HALF-OPEN state machine per service instance.                       |   ✅   |
+| Retry with Jitter           | Exponential backoff retries for GET / HEAD / OPTIONS on transient errors.           |   ✅   |
+| Timeout Handling            | Per-request AbortController timeout; configurable, defaults to 5000 ms.             |   ✅   |
+| Stream Proxy                | Binary stream forwarding with no body buffering to reduce memory overhead.          |   ✅   |
+| Identity Header Propagation | Injects `x-request-id`, `x-user-id`, `x-user-role`, `x-user-email` before proxying. |   ✅   |
+| Service Discovery           | Register and remove instances at runtime via HTTP without restarting.               |   ✅   |
+| Background Health Checks    | Polls `GET /health` every 5 seconds; removes and restores instances automatically.  |   ✅   |
+| Prometheus Metrics          | Exposes counters, histograms, gauges, and circuit state at `GET /metrics`.          |   ✅   |
+| Structured JSON Logging     | Pino logger with request-scoped context on every gateway event.                     |   ✅   |
+| Network Isolation           | Backend services and databases are only reachable inside Docker's bridge network.   |   ✅   |
+| Graceful Shutdown           | Closes Redis connections and drains HTTP on SIGTERM / SIGINT.                       |   ✅   |
+| Multi-stage Docker Build    | Separate build and runtime stages; production image contains only compiled output.  |   ✅   |
+
+---
+
+## Tech Stack
+
+| Technology              | Role                                       |
+| :---------------------- | :----------------------------------------- |
+| Node.js                 | Runtime                                    |
+| TypeScript              | Language                                   |
+| Fastify                 | HTTP framework and middleware pipeline     |
+| Redis                   | Rate limit store                           |
+| `prom-client`           | Prometheus metrics collection and exposure |
+| Pino                    | Structured JSON logging                    |
+| `jsonwebtoken`          | JWT token verification                     |
+| mkcert                  | Locally-trusted TLS certificate generation |
+| Docker & Docker Compose | Containerization and service orchestration |
+| Turborepo               | Monorepo task orchestration                |
+| pnpm                    | Package manager and workspace management   |
 
 ---
 
 ## Project Structure
 
-```text
-microservices-demo/
+```
+api-gateway/
 ├── apps/
-│   └── gateway/
-│       ├── src/                  # API Gateway implementation
-│       └── README.md             # Detailed Gateway architecture and runtime configuration
-├── services/
-│   ├── auth-service/             # Registration, login, and JWT access token issuance
-│   ├── product-service/          # Paginated product catalog CRUD & category filters (Supports clustering)
-│   ├── cart-service/             # Active cart operations cached in Redis & saved in PostgreSQL
-│   ├── order-service/            # Order creation, history, and status management
-│   ├── payment-service/          # Mock payment processing (simulates card failure rules)
-│   └── notification-service/     # Mock email, SMS, and push notification logging
-├── packages/
-│   ├── shared-types/             # Common TypeScript interfaces (JWT payload, API envelopes)
-│   └── shared-utils/             # Generic logger (Pino) and standardized HTTP error models
-├── docker/
-│   └── init-db.sh                # Automatic database setup script for Postgres container
-├── docker-compose.yml            # Local development postgres/redis/microservices orchestration
-├── turbo.json                    # Turborepo task pipeline configuration
-├── pnpm-workspace.yaml           # pnpm monorepo workspaces mapping
-├── package.json                  # Monorepo root dev scripts
-└── README.md                     # Monorepo documentation (this file)
+│   └── gateway/              # Main project — the API Gateway
+│       ├── certs/            # TLS certificates (mkcert)
+│       ├── src/
+│       │   ├── middleware/   # Request pipeline stages
+│       │   ├── resilience/   # Circuit Breaker and Retry
+│       │   ├── load-balancer/
+│       │   ├── discovery/    # In-memory registry and HTTP routes
+│       │   ├── health-checker/
+│       │   ├── observability/
+│       │   ├── proxy/
+│       │   ├── config/
+│       │   └── index.ts      # Entrypoint and pipeline bootstrap
+│       └── Dockerfile
+├── services/                 # Demo services (testing only)
+├── docs/                     # Architecture diagrams
+└── docker-compose.yml
 ```
 
----
-
-## Technical Stack
-
-- **Language**: TypeScript (Strict Mode enabled)
-- **Runtime**: Node.js 22 LTS
-- **Monorepo Manager**: Turborepo & pnpm Workspaces
-- **API Gateway**: Fastify-based, featuring:
-    - **SSL/HTTPS Termination** with localhost certificates
-    - **JWT Validation** & **Role-Based Access Control (RBAC)**
-    - **Redis-Backed Rate Limiting** (sliding window)
-    - **Dynamic Service Discovery** & routing registry
-    - **Round-Robin Load Balancing** with health bypass
-    - **Resilience Patterns**: Circuit Breakers, Request Timeouts, and Retries with Jitter
-    - **Observability**: Prometheus metrics (prom-client) & JSON logging (Pino)
-- **Web Framework**: Fastify
-- **ORM**: Prisma (using isolated databases in PostgreSQL)
-- **Cache**: Redis (transient cache with automatic fail-safes)
-- **Validation**: Zod
-- **Logger**: Pino (JSON structured format)
-- **API Documentation**: Swagger / OpenAPI (exposing `/documentation` per service)
-- **Testing**: Vitest
+> The `services/` directory contains minimal demo services used only to test the gateway. They are not the focus of this project.
 
 ---
 
-## Identity Propagation (Gateway Contract)
+## Getting Started
 
-Downstream microservices (Product, Cart, Order, Payment, Notification) do **NOT** verify JWT access tokens directly. They trust the API Gateway to do so, and expect the Gateway to pass verified identity information through HTTP headers:
-
-- `x-user-id` - Unique ID of the verified user (UUID string).
-- `x-user-role` - Role of the verified user (`admin` or `customer`).
-- `x-user-email` - Email address of the verified user.
-- `x-request-id` - Request tracking ID generated by the gateway.
-
----
-
-## Port Allocation Reference
-
-For local development or Docker orchestration, ports are allocated as follows:
-
-| Services                 | Exposed Port            | Database / Schema | Description                                              |
-| ------------------------ | ----------------------- | ----------------- | -------------------------------------------------------- |
-| **API Gateway**          | `3000` (HTTPS)          | None              | Central entry point (Reverse proxy, Load Balancer, Auth) |
-| PostgreSQL               | `5432`                  | Multiple          | Primary transactional databases                          |
-| Redis                    | `6380` (Local) / `6379` | `0`               | Rate limiting & caching active cart sessions             |
-| **Auth Service**         | `3001`                  | `auth_db`         | `/api/v1/auth` (Registers/Logins)                        |
-| **Product Service 1**    | `3002`                  | `product_db`      | `/api/v1/products` (Catalog list/CRUD instance 1)        |
-| **Product Service 2**    | `3012`                  | `product_db`      | `/api/v1/products` (Catalog list/CRUD instance 2)        |
-| **Product Service 3**    | `3022`                  | `product_db`      | `/api/v1/products` (Catalog list/CRUD instance 3)        |
-| **Cart Service**         | `3003`                  | `cart_db`         | `/api/v1/cart` (Cache-enabled basket CRUD)               |
-| **Order Service**        | `3004`                  | `order_db`        | `/api/v1/orders` (Order workflows)                       |
-| **Payment Service**      | `3005`                  | `payment_db`      | `/api/v1/payments` (Mock processor)                      |
-| **Notification Service** | `3006`                  | None              | `/api/v1/notifications` (Mocks logger)                   |
-
----
-
-## Local Development Instructions
-
-### 1. Prerequisites
-
-Ensure you have the following installed:
+### Prerequisites
 
 - [Node.js 22+](https://nodejs.org/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- [pnpm](https://pnpm.io/) (`npm i -g pnpm`)
+- [Docker Desktop](https://www.docker.com/)
+- [pnpm](https://pnpm.io/)
+- [mkcert](https://github.com/FiloSottile/mkcert) — for local TLS certificates
 
-### 2. Set Up Infrastructure Containers
-
-Spin up the shared PostgreSQL and Redis containers:
+### Install mkcert and generate certificates
 
 ```bash
-docker compose up -d postgres redis
+# Install mkcert (macOS)
+brew install mkcert
+mkcert -install
+
+# Generate certificates for the gateway
+cd apps/gateway/certs
+mkcert localhost 127.0.0.1
 ```
 
-_Note: The `postgres` container automatically triggers `docker/init-db.sh` to initialize five isolated databases on startup (`auth_db`, `product_db`, etc.)._
-
-### 3. Install Dependencies and Generate Prisma Clients
-
-Run the following command at the monorepo root to link packages and generate the Prisma Client for each database-connected microservice:
+### Clone and install
 
 ```bash
+git clone https://github.com/your-username/api-gateway.git
+cd api-gateway
+
 pnpm install
-pnpm db:generate
 ```
 
-### 4. Run Database Migrations & Seeds
-
-Apply schemas and seed initial data (Admin users, categories, products, etc.):
+### Run with Docker
 
 ```bash
-pnpm db:migrate
-pnpm db:seed
-```
-
-### 5. Start Development Server
-
-Run the API Gateway and all microservices concurrently in watch mode:
-
-```bash
-pnpm dev
-```
-
-The system will start up. All client traffic should route through the **API Gateway** on port 3000:
-
-- **Gateway Endpoint**: `https://localhost:3000/api/v1/...`
-- **Gateway Health Status**: `https://localhost:3000/health`
-- **Prometheus Metrics**: `https://localhost:3000/metrics`
-- **Dynamic Service Registry**: `https://localhost:3000/discovery`
-
-> [!NOTE]
-> Since the gateway uses a self-signed SSL certificate, you may need to disable SSL verification when making requests (e.g., using `curl -k` or `--insecure`, or selecting "Disable SSL verification" in Postman/your HTTP client).
-
-To inspect downstream microservice documentation directly (bypassing the gateway), you can visit the interactive Swagger API catalogs under:
-
-- Auth Service: [http://localhost:3001/documentation](http://localhost:3001/documentation)
-- Product Service Instances: [http://localhost:3002/documentation](http://localhost:3002/documentation), [http://localhost:3012/documentation](http://localhost:3012/documentation), [http://localhost:3022/documentation](http://localhost:3022/documentation)
-- Cart Service: [http://localhost:3003/documentation](http://localhost:3003/documentation)
-- Order Service: [http://localhost:3004/documentation](http://localhost:3004/documentation)
-- Payment Service: [http://localhost:3005/documentation](http://localhost:3005/documentation)
-- Notification Service: [http://localhost:3006/documentation](http://localhost:3006/documentation)
-
----
-
-## Running Test Suites
-
-To execute unit and integration test suites globally using Turborepo and Vitest:
-
-```bash
-pnpm test
-```
-
----
-
-## Docker Deployment (All Services)
-
-To run the entire system—including database, Redis, the API Gateway, and all microservices—inside Docker containers:
-
-```bash
+# Build and start the full environment
 docker compose up --build
 ```
 
-This builds and connects all the services, enabling full integration testing of the playground directly within the isolated Docker Network (`microservices_network`).
+This starts the gateway and all demo services inside an isolated Docker bridge network. Only the gateway is reachable from the host on port `3000`.
+
+### Verify
 
 ```bash
-docker compose up -d postgres redis
+# Gateway health
+curl -k https://localhost:3000/health
+
+# Prometheus metrics
+curl -k https://localhost:3000/metrics
+
+# Registered services
+curl -k https://localhost:3000/discovery/services
 ```
 
-_Note: The `postgres` container automatically triggers `docker/init-db.sh` to initialize five isolated databases on startup (`auth_db`, `product_db`, etc.)._
+> The `-k` flag bypasses SSL verification for the self-signed local certificate. In Postman or Insomnia, disable "SSL Certificate Verification" in the request settings.
 
-### 3. Install Dependencies and Generate Prisma Clients
+---
 
-Run the following command at the monorepo root to link packages and generate the Prisma Client for each database-connected microservice:
+## API Endpoints
+
+| Method   | Path                      | Description                                                               |
+| :------- | :------------------------ | :------------------------------------------------------------------------ |
+| `GET`    | `/health`                 | Gateway health status including Redis connectivity and per-service state. |
+| `GET`    | `/metrics`                | Prometheus text-format metrics scraping endpoint.                         |
+| `GET`    | `/discovery/services`     | Lists all registered service instances and their health status.           |
+| `POST`   | `/discovery/register`     | Registers a new service instance into the routing pool at runtime.        |
+| `DELETE` | `/discovery/:service/:id` | Removes a specific instance from the pool without restarting the gateway. |
+| `ANY`    | `/api/v1/*`               | Catch-all entry point proxied to the resolved upstream service.           |
+
+---
+
+## Implemented Components
+
+### Authentication
+
+The gateway validates `Authorization: Bearer <token>` on every inbound request using `jsonwebtoken`. Routes designated as public (e.g. `/health`) bypass this stage. On failure, the request is rejected with `401 Unauthorized` before any upstream call is made.
+
+### Authorization
+
+After authentication, the gateway checks the token's role against the access policy of the target route. Policies are defined per service prefix in the route configuration. Insufficient permissions return `403 Forbidden` before any upstream call is made.
+
+### Routing
+
+Requests are matched against prefix-based route definitions. Each route maps a URL prefix to a service name in the discovery registry. Unmatched requests return `404 Not Found`.
+
+### Health-aware Load Balancing
+
+Requests are distributed across registered instances using Round-Robin. Before selecting an instance, the balancer excludes targets that are marked unhealthy or have an open circuit breaker. Instances can be added or removed via the Service Discovery API without restarting the gateway.
+
+### Circuit Breaker
+
+Each service instance has its own independent circuit breaker. After five consecutive failures the circuit opens; subsequent requests fail immediately with `503 Service Unavailable`. After a 30-second cooldown the circuit enters HALF-OPEN and permits one trial request. Success closes the circuit; failure reopens it.
+
+### Retry
+
+Safe and idempotent methods (`GET`, `HEAD`, `OPTIONS`) are automatically retried on transient failures. Retryable conditions include network-level errors (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `EHOSTUNREACH`, `EPIPE`), abort errors, and upstream HTTP status codes `502`, `503`, and `504`. Retries use exponential backoff with randomized jitter to avoid synchronized retry storms.
+
+### Rate Limiting
+
+Rate limits are enforced using a Redis-backed sliding-window algorithm. Limits are keyed per authenticated user ID when a valid token is present, or per client IP for unauthenticated requests. Clients exceeding the threshold receive `429 Too Many Requests`.
+
+### Reverse Proxy
+
+Request bodies are streamed directly to the upstream instance without buffering. Before forwarding, the gateway injects `x-user-id`, `x-user-role`, and `x-user-email` so downstream services can trust the caller's identity without validating the token themselves. A unique `x-request-id` is generated on each request.
+
+### Observability
+
+Structured JSON logs are emitted via Pino on every request, including method, route, status code, duration, and upstream target. Prometheus-compatible metrics are collected via `prom-client` and exposed at `GET /metrics`. The `/health` endpoint reports Redis connectivity, instance counts, and circuit breaker states.
+
+### Service Discovery
+
+Instances are registered manually by calling `POST /discovery/register` with a service name and address. The gateway maintains an in-memory registry of all registered instances. A background health checker polls each instance every 5 seconds, marking unreachable instances as unhealthy and restoring them automatically when they pass a subsequent check.
+
+### Graceful Shutdown
+
+On `SIGTERM` or `SIGINT`, the gateway stops accepting new connections, closes the Redis client, and waits for in-flight requests to complete before exiting. This allows clean handoff in Docker and Kubernetes environments.
+
+### Docker Deployment
+
+The gateway ships with a multi-stage Dockerfile. The build stage compiles TypeScript; the runtime stage contains only compiled output and production dependencies. Docker Compose orchestrates the gateway, backend demo services, and Redis inside an isolated bridge network. Only the gateway is exposed to the host on port `3000`. The gateway exposes Prometheus-compatible metrics at `GET /metrics`; scraping must be configured externally.
+
+---
+
+## Observability
+
+### Health Endpoint
+
+`GET /health` returns a JSON response with the overall gateway status, Redis connection state, uptime, and the health status of every registered service instance. Useful for readiness probes and operational dashboards.
+
+### Prometheus Metrics
+
+`GET /metrics` exposes metrics in Prometheus text format. The following are available:
+
+| Metric                            | Type      | Description                                                               |
+| :-------------------------------- | :-------- | :------------------------------------------------------------------------ |
+| `http_requests_total`             | Counter   | Total requests processed by the gateway.                                  |
+| `http_request_duration_seconds`   | Histogram | End-to-end request latency.                                               |
+| `gateway_active_requests`         | Gauge     | Requests currently in flight.                                             |
+| `gateway_upstream_requests_total` | Counter   | Requests forwarded to upstream services.                                  |
+| `gateway_upstream_failures_total` | Counter   | Upstream failures broken down by reason.                                  |
+| `gateway_retries_total`           | Counter   | Total retry attempts made.                                                |
+| `gateway_circuit_state`           | Gauge     | Per-instance circuit breaker state (0 = Closed, 1 = Half-Open, 2 = Open). |
+| `gateway_rate_limited_total`      | Counter   | Requests rejected by the rate limiter.                                    |
+
+### Logging
+
+All logs are emitted as structured JSON via Pino. Each log entry includes the request ID, HTTP method, route, status code, response time, and upstream target. Log level is configurable via the `LOG_LEVEL` environment variable.
+
+---
+
+## Future Improvements
+
+| Improvement                     | Description                                                                    | Status  |
+| :------------------------------ | :----------------------------------------------------------------------------- | :-----: |
+| OpenTelemetry Tracing           | Instrument spans across gateway and upstream services using the OTel SDK.      | Planned |
+| Distributed Service Discovery   | Replace in-memory registry with Consul or etcd for multi-instance deployments. | Planned |
+| Response Caching                | Redis-backed cache for idempotent `GET` endpoints with configurable TTL.       | Planned |
+| Least-Connections Load Balancer | Route to the instance with the fewest active concurrent connections.           | Planned |
+| Gateway-to-Service mTLS         | Authenticate internal requests using mutual TLS between gateway and services.  | Planned |
+| Canary Deployments              | Route a configurable percentage of traffic to a new service version.           | Planned |
+| API Versioning                  | Native support for versioned route prefixes (`/api/v1/`, `/api/v2/`).          | Planned |
+| WebSocket Support               | Proxy long-lived WebSocket connections through the gateway.                    | Planned |
+| Plugin System                   | Extensible middleware registration API for adding custom pipeline stages.      | Planned |
+| Rate Limit Header Exposure      | Return `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` headers.    | Planned |
+
+---
+
+## Contributing
+
+Contributions that improve correctness, add missing gateway patterns, or improve test and observability coverage are welcome.
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/your-feature`.
+3. Commit your changes with a descriptive message.
+4. Open a pull request explaining what the change does and why.
+
+Keep pull requests focused. One feature or fix per PR.
